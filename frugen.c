@@ -226,6 +226,7 @@ int main(int argc, char *argv[])
 	size_t size;
 
 	bool cust_binary = false; // Flag: treat the following custom attribute as binary
+	bool cust_erase = false; // Flag: erase the following custom attribute before appending to it
 	bool no_curr_date = false; // Flag: don't use current timestamp if no 'date' is specified
 
 	const char *fname = NULL;
@@ -255,6 +256,9 @@ int main(int argc, char *argv[])
 
 		/* Mark the following '*-custom' data as binary */
 		{ .name = "binary",        .val = 'b', .has_arg = false },
+
+        /* Erase the original contents of the following '*-custom' data */
+		{ .name = "erase",        .val = 'e', .has_arg = false },
 
 		/* Set input file format to JSON */
 		{ .name = "json",          .val = 'j', .has_arg = false },
@@ -299,6 +303,8 @@ int main(int argc, char *argv[])
 			    "Example: frugen --binary --board-custom 0012DEADBEAF\n"
 			    "\n\t\t"
 			    "There must be an even number of characters in a 'binary' argument",
+        ['e'] = "Erase the initial value of the next --*-custom option.\n\t"
+                " Example: frugen --raw --from fru.bin --erase --chassis-custom helloworld",
 		['j'] = "Set input text file format to JSON (default). Specify before '--from'",
 		['r'] = "Set input file format to raw binary. Specify before '--from'",
 		['z'] = "Load FRU information from a text file",
@@ -346,6 +352,10 @@ int main(int argc, char *argv[])
 			case 'b': // binary
 				debug(2, "Next custom field will be considered binary");
 				cust_binary = true;
+				break;
+			case 'e': // erase
+				debug(2, "Next custom field will be erased first");
+				cust_erase = true;
 				break;
 			case 'v': // verbose
 				debug_level++;
@@ -623,6 +633,16 @@ int main(int argc, char *argv[])
 
 		if (custom) {
 			fru_reclist_t *custptr;
+
+            if (cust_erase) {
+			    debug(3, "Erasing custom fields");
+                custptr = *custom;
+                if (custptr) {
+                    free_reclist(custptr);
+                    custptr = *custom = NULL;
+                }
+            }
+
 			debug(3, "Adding a custom field from argument [%s]", optarg);
 			custptr = add_reclist(custom);
 
@@ -639,6 +659,7 @@ int main(int argc, char *argv[])
 			if (!custptr->rec) {
 				fatal("Failed to encode custom field. Memory allocation or field length problem.");
 			}
+			cust_erase = false;
 			cust_binary = false;
 		}
 	} while (opt != -1);
