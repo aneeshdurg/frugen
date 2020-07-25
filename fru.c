@@ -66,7 +66,8 @@ static inline uint8_t fru_field_copy(void *dest, const fru_field_t *fieldp)
  */
 static
 uint8_t fru_get_typelen(int len,             /**< [in] Length of the data or LEN_AUTO for pure text zero-terminated data */
-                        const uint8_t *data) /**< [in] The input data */
+                        const uint8_t *data, /**< [in] The input data */
+                        bool simple_text) /**< [in] Use simple text encoding for all text encoding */
 {
 	uint8_t typelen = len;
 	int i;
@@ -95,6 +96,10 @@ uint8_t fru_get_typelen(int len,             /**< [in] Length of the data or LEN
 
 	// As we reach this point, we know the data must be text.
 	// We will try to find the encoding that suits best.
+	if (simple_text) {
+		DEBUG("Use simple text due to simple-text flag\n");
+		return FRU_TYPELEN(TEXT, len);
+	}
 
 	typelen = FRU_TYPELEN(BCDPLUS, (len + 1) / 2); // By default - the most range-restricted text type
 
@@ -245,12 +250,12 @@ static bool fru_decode_6bit(uint8_t typelen, //<[in] typelen of encoded buffer
 /**
  * Allocate a buffer and encode that data as per FRU specification
  */
-fru_field_t * fru_encode_data(int len, const uint8_t *data)
+fru_field_t * fru_encode_data(int len, const uint8_t *data, bool simple_text)
 {
 	int typelen;
 	fru_field_t *out;
 
-	typelen = fru_get_typelen(len, data);
+	typelen = fru_get_typelen(len, data, simple_text);
 	if (FRU_FIELD_TERMINATOR == typelen)
 		return NULL; // Can't encode this data
 
@@ -423,7 +428,8 @@ fru_info_area_t *fru_create_info_area(fru_area_type_t atype,    ///< [in] Area t
                                       const struct timeval *tv, ///< [in] Manufacturing time since the Epoch (1970/01/01 00:00:00 +0000 UTC) for areas that use it (board)
                                       fru_reclist_t *fields,   ///< [in] Single-linked list of data fields
                                       size_t nstrings,         ///< [in] Number of strings for mandatory fields
-                                      const unsigned char *strings[]) ///<[in] Array of strings for mandatory fields
+                                      const unsigned char *strings[], ///<[in] Array of strings for mandatory fields
+                                      bool simple_text) ///<[in] Use simple text encoding for all text encoding
 {
 	int i = 0;
 	int field_count;
@@ -480,7 +486,7 @@ fru_info_area_t *fru_create_info_area(fru_area_type_t atype,    ///< [in] Area t
 	     field && !field->rec && field_count < nstrings;
 	     field = field->next, field_count++)
 	{
-		field->rec = fru_encode_data(LEN_AUTO, strings[field_count]);
+		field->rec = fru_encode_data(LEN_AUTO, strings[field_count], simple_text);
 		if (!field->rec) goto err;
 	}
 
@@ -549,7 +555,7 @@ static bool fru_decode_custom_fields(const uint8_t *data, fru_reclist_t **reclis
 			return false;
 		memcpy(buff, data, length);
 		buff[length] = 0;
-		custom_field->rec = fru_encode_data(LEN_AUTO, buff);
+		custom_field->rec = fru_encode_data(LEN_AUTO, buff, false);
 		data += FRU_FIELDDATALEN(typelen);
 	}
 
@@ -574,7 +580,8 @@ static bool fru_decode_custom_fields(const uint8_t *data, fru_reclist_t **reclis
  * @returns fru_info_area_t *area A newly allocated buffer containing the created area
  *
  */
-fru_chassis_area_t * fru_encode_chassis_info(const fru_exploded_chassis_t *chassis) ///< [in] Exploded chassis info area
+fru_chassis_area_t * fru_encode_chassis_info(const fru_exploded_chassis_t *chassis, /**< [in] Exploded chassis info area */
+		bool simple_text) /**< [in] Use simple text encoding for all text encoding */
 {
 	int i;
 
@@ -598,7 +605,7 @@ fru_chassis_area_t * fru_encode_chassis_info(const fru_exploded_chassis_t *chass
 
 	out = fru_create_info_area(FRU_CHASSIS_INFO,
 	                           chassis->type, NULL, fields,
-	                           ARRAY_SZ(strings), strings);
+	                           ARRAY_SZ(strings), strings, simple_text);
 
 	return out;
 }
@@ -650,7 +657,8 @@ bool fru_decode_chassis_info(
  * @returns fru_info_area_t *area A newly allocated buffer containing the created area
  *
  */
-fru_board_area_t * fru_encode_board_info(const fru_exploded_board_t *board) ///< [in] Exploded board information area
+fru_board_area_t * fru_encode_board_info(const fru_exploded_board_t *board, /**< [in] Exploded board information area */
+		bool simple_text) /**< [in] Use simple text encoding for all text encoding */
 {
 	int i;
 
@@ -672,7 +680,7 @@ fru_board_area_t * fru_encode_board_info(const fru_exploded_board_t *board) ///<
 
 	out = (fru_board_area_t *)fru_create_info_area(FRU_BOARD_INFO,
 	                                               board->lang, &board->tv, fields,
-	                                               ARRAY_SZ(strings), strings);
+	                                               ARRAY_SZ(strings), strings, simple_text);
 
 	return out;
 }
@@ -751,7 +759,8 @@ bool fru_decode_board_info(
  * @returns fru_info_area_t *area A newly allocated buffer containing the created area
  *
  */
-fru_product_area_t * fru_encode_product_info(const fru_exploded_product_t *product) ///< [in] Exploded product information area
+fru_product_area_t * fru_encode_product_info(const fru_exploded_product_t *product, /**< [in] Exploded product information area */
+		bool simple_text) /**< [in] Use simple text encoding for all text encoding */
 {
 	int i;
 
@@ -778,7 +787,7 @@ fru_product_area_t * fru_encode_product_info(const fru_exploded_product_t *produ
 
 	out = fru_create_info_area(FRU_PRODUCT_INFO,
 	                           product->lang, NULL, fields,
-	                           ARRAY_SZ(strings), strings);
+	                           ARRAY_SZ(strings), strings, simple_text);
 
 	return out;
 }
@@ -987,7 +996,7 @@ void test_encodings(void)
 
 		printf("Original type: %s\n", test_types[i]);
 		printf("Encoding... ");
-		field = fru_encode_data(test_lengths[i], test_strings[i]);
+		field = fru_encode_data(test_lengths[i], test_strings[i], false);
 		if (FRU_FIELD_TERMINATOR == field->typelen) {
 			printf("FAIL!\n\n");
 			continue;

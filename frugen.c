@@ -92,7 +92,7 @@ bool datestr_to_tv(const char *datestr, struct timeval *tv)
 	return true;
 }
 
-fru_field_t * fru_encode_custom_binary_field(const char *hexstr)
+fru_field_t * fru_encode_custom_binary_field(const char *hexstr, bool simple_text)
 {
 	int len, i;
 	uint8_t *buf;
@@ -113,7 +113,7 @@ fru_field_t * fru_encode_custom_binary_field(const char *hexstr)
 			fatal("Invalid hex data provided for binary custom attribute");
 		buf[i] = byte;
 	}
-	rec = fru_encode_data(len, buf);
+	rec = fru_encode_data(len, buf, simple_text);
 	free(buf);
 
 	return rec;
@@ -141,7 +141,7 @@ bool json_fill_fru_area_fields(json_object *jso, int count,
 	return data_in_this_area;
 }
 
-bool json_fill_fru_area_custom(json_object *jso, fru_reclist_t **custom)
+bool json_fill_fru_area_custom(json_object *jso, fru_reclist_t **custom, bool simple_text)
 {
 	int i, alen;
 	json_object *jsfield;
@@ -192,9 +192,9 @@ bool json_fill_fru_area_custom(json_object *jso, fru_reclist_t **custom)
 			return false;
 
 		if (!strcmp(type, "binary")) {
-			custptr->rec = fru_encode_custom_binary_field(data);
+			custptr->rec = fru_encode_custom_binary_field(data, simple_text);
 		} else {
-			custptr->rec = fru_encode_data(LEN_AUTO, data);
+			custptr->rec = fru_encode_data(LEN_AUTO, data, simple_text);
 		}
 
 		if (!custptr->rec) {
@@ -266,6 +266,9 @@ int main(int argc, char *argv[])
 		/* Set input file format to raw binary */
 		{ .name = "raw",          .val = 'r', .has_arg = false },
 
+		/* Set output text encoding to simple text */
+		{ .name = "simple-text",   .val = 'T', .has_arg = false },
+
 		/* Set file to load the data from */
 		{ .name = "from",          .val = 'z', .has_arg = true },
 
@@ -307,6 +310,9 @@ int main(int argc, char *argv[])
                 " Example: frugen --raw --from fru.bin --erase --chassis-custom helloworld",
 		['j'] = "Set input text file format to JSON (default). Specify before '--from'",
 		['r'] = "Set input file format to raw binary. Specify before '--from'",
+		['T'] = "Set text encode format to be simple text instead of choosing the most "
+			    "appropriate one among ASCII, BCD and simple text. This doesn't affect "
+			    "binary encoding",
 		['z'] = "Load FRU information from a text file",
 		/* Chassis info area related options */
 		['t'] = "Set chassis type (hex). Defaults to 0x02 ('Unknown')",
@@ -343,6 +349,7 @@ int main(int argc, char *argv[])
 
 	bool use_json = false; /* TODO: Add more input formats, consider libconfig */
 	bool use_binary = false;
+	bool simple_text = false;
 
 	do {
 		fru_reclist_t **custom = NULL;
@@ -398,6 +405,10 @@ int main(int argc, char *argv[])
 				}
 				break;
 
+			case 'T': // simple_text
+				simple_text = true;
+				break;
+
 			case 'z': // from
 				debug(2, "Will load FRU information from file %s", optarg);
 				if (use_json) {
@@ -427,7 +438,7 @@ int main(int argc, char *argv[])
 							}
 							/* Now get values for the string fields */
 							has_chassis |= json_fill_fru_area_fields(jso, ARRAY_SZ(field), fieldname, field);
-							has_chassis |= json_fill_fru_area_custom(jso, &chassis.cust);
+							has_chassis |= json_fill_fru_area_custom(jso, &chassis.cust, simple_text);
 						} else if (!strcmp(iter.key, "board")) {
 							const char *fieldname[] = { "mfg", "pname", "pn", "serial", "file" };
 							char *field[] = { board.mfg, board.pname, board.pn, board.serial, board.file };
@@ -451,7 +462,7 @@ int main(int argc, char *argv[])
 							}
 							/* Now get values for the string fields */
 							has_board |= json_fill_fru_area_fields(jso, ARRAY_SZ(field), fieldname, field);
-							has_board |= json_fill_fru_area_custom(jso, &board.cust);
+							has_board |= json_fill_fru_area_custom(jso, &board.cust, simple_text);
 						} else if (!strcmp(iter.key, "product")) {
 							const char *fieldname[] = { "mfg", "pname", "pn", "ver", "serial", "atag", "file" };
 							char *field[] = { product.mfg, product.pname, product.pn, product.ver,
@@ -467,7 +478,7 @@ int main(int argc, char *argv[])
 #endif
 							/* Now get values for the string fields */
 							has_product |= json_fill_fru_area_fields(jso, ARRAY_SZ(field), fieldname, field);
-							has_product |= json_fill_fru_area_custom(jso, &product.cust);
+							has_product |= json_fill_fru_area_custom(jso, &product.cust, simple_text);
 						} else if (!strcmp(iter.key, "multirecord")) {
 							debug(1, "Multirecord area is not yet supported, JSON object skipped");
 							continue;
@@ -650,11 +661,11 @@ int main(int argc, char *argv[])
 				fatal("Failed to allocate a custom record list entry");
 
 			if (cust_binary) {
-				custptr->rec = fru_encode_custom_binary_field(optarg);
+				custptr->rec = fru_encode_custom_binary_field(optarg, simple_text);
 			}
 			else {
 				debug(3, "The custom field will be auto-typed");
-				custptr->rec = fru_encode_data(LEN_AUTO, optarg);
+				custptr->rec = fru_encode_data(LEN_AUTO, optarg, simple_text);
 			}
 			if (!custptr->rec) {
 				fatal("Failed to encode custom field. Memory allocation or field length problem.");
@@ -679,7 +690,7 @@ int main(int argc, char *argv[])
 		fru_chassis_area_t *ci = NULL;
 		debug(1, "FRU file will have a chassis information area");
 		debug(3, "Chassis information area's custom field list is %p", chassis.cust);
-		ci = fru_encode_chassis_info(&chassis);
+		ci = fru_encode_chassis_info(&chassis, simple_text);
 		e = errno;
 		free_reclist(chassis.cust);
 
@@ -703,7 +714,7 @@ int main(int argc, char *argv[])
 			board.tv = (struct timeval){0};
 		}
 
-		bi = fru_encode_board_info(&board);
+		bi = fru_encode_board_info(&board, simple_text);
 		e = errno;
 		free_reclist(board.cust);
 
@@ -720,7 +731,7 @@ int main(int argc, char *argv[])
 		fru_product_area_t *pi = NULL;
 		debug(1, "FRU file will have a product information area");
 		debug(3, "Product information area's custom field list is %p", product.cust);
-		pi = fru_encode_product_info(&product);
+		pi = fru_encode_product_info(&product, simple_text);
 
 		e = errno;
 		free_reclist(product.cust);
